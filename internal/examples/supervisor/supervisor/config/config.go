@@ -11,5 +11,7 @@ type OpAMPServer struct {
 }
 
 type Agent struct {
-	Executable string
+	Executable  string
+	LocalConfig string `koanf:"local_config"`
+	Type        string
 }

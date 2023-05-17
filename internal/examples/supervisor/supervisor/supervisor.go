@@ -59,6 +59,9 @@ type Supervisor struct {
 	// config correctly.
 	agentConfigOwnMetricsSection atomic.Value
 
+	// localConfig specifies additional local configuration.
+	localConfig string
+
 	// Final effective config of the Collector.
 	effectiveConfig atomic.Value
 
@@ -91,6 +94,7 @@ func NewSupervisor(logger types.Logger) (*Supervisor, error) {
 	logger.Debugf("Supervisor starting, id=%v, type=%s, version=%s.",
 		s.instanceId.String(), agentType, agentVersion)
 
+	s.loadLocalConfig()
 	s.loadAgentEffectiveConfig()
 
 	if err := s.startOpAMP(); err != nil {
@@ -211,7 +215,9 @@ func (s *Supervisor) createAgentDescription() *protobufs.AgentDescription {
 }
 
 func (s *Supervisor) composeExtraLocalConfig() string {
-
+	if s.localConfig != "" {
+		return s.localConfig
+	}
 	return fmt.Sprintf(`
 service:
   telemetry:
@@ -236,6 +242,16 @@ extensions:
 		s.agentVersion,
 		s.instanceId.String(),
 	)
+}
+
+func (s *Supervisor) loadLocalConfig() {
+	var data []byte
+	data, err := os.ReadFile(s.config.Agent.LocalConfig)
+	if err != nil {
+		// No effective config file, just use the initial config.
+		data = []byte(s.composeExtraLocalConfig())
+	}
+	s.localConfig = string(data)
 }
 
 func (s *Supervisor) loadAgentEffectiveConfig() error {
@@ -424,6 +440,9 @@ func (s *Supervisor) startAgent() {
 
 	// TODO: choose the port dynamically.
 	healthEndpoint := "http://localhost:13133"
+	if s.config.Agent.Type == "datadog" {
+		healthEndpoint = "http://localhost:8126/info"
+	}
 	s.healthChecker = healthchecker.NewHttpHealthChecker(healthEndpoint)
 }
 
@@ -558,7 +577,7 @@ func (s *Supervisor) onMessage(ctx context.Context, msg *types.MessageData) {
 		}
 	}
 
-	if msg.OwnMetricsConnSettings != nil {
+	if msg.OwnMetricsConnSettings != nil && s.config.Agent.Type != "datadog" {
 		configChanged = s.setupOwnMetrics(ctx, msg.OwnMetricsConnSettings) || configChanged
 	}
 
